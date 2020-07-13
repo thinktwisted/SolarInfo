@@ -35,6 +35,6 @@ yesterday = today - timedelta(days = 1)
 date = yesterday.strftime("%Y-%m-%d")
 energy = grabSolar(login, date)
 
-csv = open('Weatherburn_Solar_Production.csv', 'a') # 'w' is rwite 'a' is append
-csv.write(str(date) + "," + str(energy) + '\n')
+csv = open('Weatherburn_Solar_Production.csv', 'a') # 'w' is write 'a' is append
+csv.write(str(date) + "," + str(energy) + ',')
 csv.close()
