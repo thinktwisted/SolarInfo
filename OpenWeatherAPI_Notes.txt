@@ -1,0 +1,7 @@
+We can request hour by hour time for up to 5 days in the past using this call:
+http://api.openweathermap.org/data/2.5/onecall/timemachine?lat=40.18&lon=-83.09&dt={EPOCH TIME HERE - e.g. 1594627200}&appid={API KEY HERE}
+
+I'm not sure the best way to handle and aggregate all this data.
+This will return hour by hour data for that date with the following format, abbreviated for brevity:
+
+{"lat":40.18,"lon":-83.09,"timezone":"America/New_York","timezone_offset":-14400,"current":{"dt":1594627200,"sunrise":1594635259,"sunset":1594688496,"temp":290.3,"feels_like":291.61,"pressure":1010,"humidity":100,"dew_point":290.3,"uvi":8.64,"clouds":1,"visibility":16093,"wind_speed":1.61,"wind_deg":330,"weather":[{"id":800,"main":"Clear","description":"clear sky","icon":"01n"}]},"hourly":[{"dt":1594598400,"temp":296.37,"feels_like":296.66,"pressure":1008,"humidity":69,"dew_point":290.37,"clouds":1,"visibility":16093,"wind_speed":3.1,"wind_deg":290,"weather":[{"id":800,"main":"Clear","description":"clear sky","icon":"01d"}]},{"dt":1594602000,"temp":294.77,"feels_like":296.27,"pressure":1008,"humidity":77,"dew_point":290.57,"clouds":1,"visibility":16093,"wind_speed":1.5,"wind_deg":290,"weather":[{"id":800,"main":"Clear","description":"clear sky","icon":"01d"}]},{"dt":1594605600,"temp":292.78,"feels_like":293.71,"pressure":1009,"humidity":88,"dew_point":290.74,"clouds":1,"visibility":16093,"wind_speed":2.42,"wind_deg":336,"weather":[{"id":800,"main":"Clear","description":"clear sky","icon":"01n"}]},
