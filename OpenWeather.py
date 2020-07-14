@@ -38,7 +38,12 @@ weather['humidity'] = weatherData['main']['humidity']
 weather['sky'] = weatherData['weather'][0]['description']
 weather['clouds'] = weatherData['clouds']['all'] # percent cloudly
 weather['wind'] = weatherData['wind']['speed']
-print(weather)
+weather['sunrise'] = weatherData['sys']['sunrise']
+weather['sunset'] = weatherData['sys']['sunset']
+diff = weather['sunset'] - weather['sunrise']
+sun_hrs = round(diff/3600,2)
+weather['sunhrs'] = sun_hrs
+#print(weather)
 
 csv = open('Weatherburn_Solar_Production.csv', 'a') # 'w' is write 'a' is append
 for key, value in weather.items():
