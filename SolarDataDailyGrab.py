@@ -36,5 +36,6 @@ date = yesterday.strftime("%Y-%m-%d")
 energy = grabSolar(login, date)
 
 csv = open('Weatherburn_Solar_Production.csv', 'a') # 'w' is write 'a' is append
-csv.write(str(date) + "," + str(energy) + ',')
+#csv.write(str(date) + "," + str(energy) + '\n')
+csv.write(str(energy) + '\n')
 csv.close()

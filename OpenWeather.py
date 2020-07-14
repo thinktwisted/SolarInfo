@@ -2,6 +2,7 @@
 # Open Weather API Script to get the daily weather
 # Run at 2PM every day to get peek at weather
 # API Doc: https://openweathermap.org/current
+from datetime import date
 import requests, json
 
 loginfile = 'OpenWeatherAPI.txt'
@@ -28,8 +29,10 @@ weatherData.raise_for_status() # Checks for Exceptions
 # Uncomment to see the raw JSON text:
 #print(weatherData.text) 
 weatherData = json.loads(weatherData.text)
-print(weatherData)
-weather = {}
+#print(weatherData)
+today = date.today()
+date = today.strftime("%Y-%m-%d")
+weather = {'date':date}
 weather['temp'] = round((weatherData['main']['temp_max']-273.15)*9/5+32,1) #convert to F
 weather['humidity'] = weatherData['main']['humidity']
 weather['sky'] = weatherData['weather'][0]['description']
@@ -39,8 +42,5 @@ print(weather)
 
 csv = open('Weatherburn_Solar_Production.csv', 'a') # 'w' is write 'a' is append
 for key, value in weather.items():
-    if key in ['wind']:
-        csv.write(str(value) + '\n')
-    else:
-        csv.write(str(value) + ",")
+    csv.write(str(value) + ",")
 csv.close()
