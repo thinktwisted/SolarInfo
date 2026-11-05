@@ -1,58 +1,42 @@
-#!python3
-# A script to grab back dated data from the enphase API
-from datetime import timedelta, date
-from time import sleep
-import json, requests
+#! python3
+"""Backfill historical daily production into the archive via Enphase v4.
 
-def grabSolar(login, startDate):
-    key = login[5]
-    userID = login[6]
-    sysID = login[7]
+v4 energy_lifetime returns a whole date range in one request (one entry per
+day, no gaps), so unlike the old v2 script there is no per-day sleep loop.
+Rows land in solar_staging.csv keyed by their own date, then merge into the
+archive — a re-run simply overwrites the same dates.
 
-    # Request Data from API
-    # Example URL: https://api.enphaseenergy.com/api/v2/systems/EXAMPLE_SYSTEM_ID/energy_lifetime?start_date=2020-04-02&end_date=2020-05-01&key={REDACTED - rotate this key}&user_id={REDACTED}
-    #energy = 'https://api.enphaseenergy.com/api/v2/systems/%s/energy_lifetime?start_date=%s&end_date=%s&key=%s&user_id=%s' % (sysID, startDate, endDate, key, userID)
-    energy = 'https://api.enphaseenergy.com/api/v2/systems/%s/energy_lifetime?start_date=%s&end_date=%s&key=%s&user_id=%s' % (sysID, startDate, startDate, key, userID)
-    solarData = requests.get(energy)
+Dates are ISO YYYY-MM-DD. Edit START/END below (or set via CLI args) to match
+the range you need, then: python SolarBackData.py [START] [END]
+"""
 
-    # Put data into dictionary & return the production
-    prodData = json.loads(solarData.text)
-    prodTotal = sum(int(i) for i in prodData['production'])
-    prodTotal = prodTotal/1000 # convert Wh to kWh
-    return prodTotal
+import sys
+from datetime import date
 
-def daterange(date1, date2):
-    for n in range(int ((date2 - date1).days)+1):
-        yield date1 + timedelta(n)
+import csvstore
+import enphase
 
-start_dt = date(2020, 2, 1)
-end_dt = date(2020, 6, 29)
-dateList = []
-energyList = []
-loginfile = 'SolarLoginInfo.txt'
+# Sensible default window; override with two CLI args if you need another range.
+START = "2020-02-01"
+END = date.today().isoformat()
 
-# Get the log in information from the text file
-login = []
-with open(loginfile) as file_object:
-    for line in file_object:
-        if line == None:
-            continue
-        else:
-            login.append(line.rstrip())
 
-for dt in daterange(start_dt, end_dt):
-    dateList.append(dt.strftime("%Y-%m-%d"))
+def main():
+    conf = csvstore.load_config("SolarLoginInfo.txt", required=("system_id", "token"))
+    start = sys.argv[1] if len(sys.argv) > 1 else START
+    end = sys.argv[2] if len(sys.argv) > 2 else END
 
-for date in dateList:
-    print('Requesting date: ' + str(date), end = " ")
-    energy = grabSolar(login, date)
-    print('Returned value: ' + str(energy))
-    energyList.append(energy)
-    sleep(8)
+    days = enphase.fetch_production(conf["system_id"], conf["token"], start, end, conf.get("key"))
+    if not days:
+        sys.exit(f"ERROR: no production data returned for {start}..{end}")
 
-csv = open('Weatherburn_Solar_Production.csv', 'w')
-for i in range(len(dateList)):
-    print(str(dateList[i]) + "," + str(energyList[i]))
-    csv.write(str(dateList[i]) + "," + str(energyList[i]) + '\n')
+    for day, kwh in days.items():
+        csvstore.upsert_solar(day, kwh)
+    csvstore.merge_final()
 
-csv.close()
+    total = sum(days.values())
+    print(f"Backfilled {len(days)} day(s) {start}..{end} (total {total:.1f} kWh)")
+
+
+if __name__ == "__main__":
+    main()

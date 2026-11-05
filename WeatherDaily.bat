@@ -1,2 +1,3 @@
-cd /D E:\python\Solar Daily
-"C:\Users\John\AppData\Local\Programs\Python\Python38-32\python.exe" "E:\python\Solar Daily\OpenWeather.py"
+@echo off
+cd /d "%~dp0"
+py "%~dp0OpenWeather.py"

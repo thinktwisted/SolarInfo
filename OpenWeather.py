@@ -1,51 +1,70 @@
 #! python3
-# Open Weather API Script to get the daily weather
-# Run at 2PM every day to get peek at weather
-# API Doc: https://openweathermap.org/current
-from datetime import date
-import requests, json
+"""Daily weather grab: current conditions snapshot, keyed by today's date.
 
-loginfile = 'OpenWeatherAPI.txt'
+Writes to weather_staging.csv and rebuilds the archive CSV via csvstore.
+Run it after SolarDataDailyGrab.py or before, either order; on the same day
+or a day apart; the merge always keys both halves by their own dates.
 
-# Get the log in information from the text file
-login = []
-with open(loginfile) as file_object:
-    for line in file_object:
-        if line == None:
-            continue
-        else:
-            login.append(line.rstrip())
-APPID = login[0]
-# LOCATION = 'lon:-83.09,lat:40.18'
-ZIP = 43065
+Config: OpenWeatherAPI.txt — `appid=...` (or first bare line = appid, second =
+zip) for backwards compatibility. Default zip 43065 (Westerville, OH).
+API docs: https://openweathermap.org/current
+"""
 
-# Download the JSON data from OpenWeatherMap.org's API.
-#url ='https://api.openweathermap.org/data/2.5/forecast/daily?q=%s&cnt=3&APPID=%s' % (LOCATION, APPID)
-url = 'https://api.openweathermap.org/data/2.5/weather?zip=%s&appid=%s' % (ZIP, APPID)
+import sys
+from datetime import date, datetime
 
-weatherData = requests.get(url)
-weatherData.raise_for_status() # Checks for Exceptions
+import requests
 
-# Uncomment to see the raw JSON text:
-#print(weatherData.text) 
-weatherData = json.loads(weatherData.text)
-#print(weatherData)
-today = date.today()
-date = today.strftime("%Y-%m-%d")
-weather = {'date':date}
-weather['temp'] = round((weatherData['main']['temp_max']-273.15)*9/5+32,1) #convert to F
-weather['humidity'] = weatherData['main']['humidity']
-weather['sky'] = weatherData['weather'][0]['description']
-weather['clouds'] = weatherData['clouds']['all'] # percent cloudly
-weather['wind'] = weatherData['wind']['speed']
-weather['sunrise'] = weatherData['sys']['sunrise']
-weather['sunset'] = weatherData['sys']['sunset']
-diff = weather['sunset'] - weather['sunrise']
-sun_hrs = round(diff/3600,2)
-weather['sunhrs'] = sun_hrs
-#print(weather)
+import csvstore
 
-csv = open('Weatherburn_Solar_Production.csv', 'a') # 'w' is write 'a' is append
-for key, value in weather.items():
-    csv.write(str(value) + ",")
-csv.close()
+TIMEOUT = 30
+ZIP_DEFAULT = "43065"
+
+
+def main():
+    conf = csvstore.load_config("OpenWeatherAPI.txt")
+    lines = conf["_lines"]
+    appid = conf.get("appid") or (lines[0] if lines else None)
+    if not appid:
+        sys.exit("ERROR: OpenWeatherAPI.txt has no appid. See README.md.")
+    zip_code = conf.get("zip") or (lines[1] if len(lines) > 1 else ZIP_DEFAULT)
+
+    try:
+        resp = requests.get(
+            "https://api.openweathermap.org/data/2.5/weather",
+            params={"zip": zip_code, "appid": appid},
+            timeout=TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        sys.exit(f"ERROR: OpenWeatherMap request failed: {exc}")
+    if resp.status_code != 200:
+        sys.exit(f"ERROR: OpenWeatherMap returned {resp.status_code}: {resp.text.strip()}")
+    data = resp.json()
+
+    main_ = data["main"]
+    sys_ = data["sys"]
+    weather = {
+        # temp_max on this endpoint is a station reading near run time,
+        # not a true daily maximum — same caveat as the original script.
+        "temperature": f"{round((main_['temp_max'] - 273.15) * 9 / 5 + 32, 1)}",
+        "humidity": str(main_["humidity"]),
+        "sky": data["weather"][0]["description"],
+        "cloudiness": str(data["clouds"]["all"]),
+        "wind": str(data["wind"]["speed"]),  # m/s
+        "sunrise": _hms(sys_["sunrise"]),
+        "sunset": _hms(sys_["sunset"]),
+        "daylight_hr": f"{round((sys_['sunset'] - sys_['sunrise']) / 3600, 2)}",
+    }
+
+    today = date.today().isoformat()
+    csvstore.upsert_weather(today, weather)
+    csvstore.merge_final()
+    print(f"Recorded {today}: {weather['temperature']} F, {weather['sky']}")
+
+
+def _hms(epoch):
+    return datetime.fromtimestamp(epoch).strftime("%H:%M")
+
+
+if __name__ == "__main__":
+    main()

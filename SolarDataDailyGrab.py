@@ -1,41 +1,22 @@
-from datetime import date, timedelta
-import json, requests
+#! python3
+"""Daily solar grab: yesterday's Enphase production, keyed by its own date.
 
-def grabSolar(login, startDate):
-    key = login[5]
-    userID = login[6]
-    sysID = login[7]
+Writes to solar_staging.csv and rebuilds the archive CSV via csvstore, so a
+failure here leaves the archive exactly as it was (the old scheme could
+strand a half-written row).
+"""
 
-    # Request Data from API
-    # Example URL: https://api.enphaseenergy.com/api/v2/systems/EXAMPLE_SYSTEM_ID/energy_lifetime?start_date=2020-04-02&end_date=2020-05-01&key={REDACTED - rotate this key}&user_id={REDACTED}
-    #energy = 'https://api.enphaseenergy.com/api/v2/systems/%s/energy_lifetime?start_date=%s&end_date=%s&key=%s&user_id=%s' % (sysID, startDate, endDate, key, userID)
-    energy = 'https://api.enphaseenergy.com/api/v2/systems/%s/energy_lifetime?start_date=%s&end_date=%s&key=%s&user_id=%s' % (sysID, startDate, startDate, key, userID)
-    solarData = requests.get(energy)
+import csvstore
+import enphase
 
-    # Put data into dictionary & return the production
-    prodData = json.loads(solarData.text)
-    prodTotal = sum(int(i) for i in prodData['production'])
-    prodTotal = prodTotal/1000 # convert Wh to kWh
-    return prodTotal
 
-dateList = []
-energyList = []
-loginfile = 'SolarLoginInfo.txt'
+def main():
+    conf = csvstore.load_config("SolarLoginInfo.txt", required=("system_id", "token"))
+    day, kwh = enphase.fetch_yesterday_kwh(conf["system_id"], conf["token"], conf.get("key"))
+    csvstore.upsert_solar(day, kwh)
+    csvstore.merge_final()
+    print(f"Recorded {day}: {kwh:.3f} kWh")
 
-# Get the log in information from the text file
-login = []
-with open(loginfile) as file_object:
-    for line in file_object:
-        if line == None:
-            continue
-        else:
-            login.append(line.rstrip())
-today = date.today()
-yesterday = today - timedelta(days = 1)
-date = yesterday.strftime("%Y-%m-%d")
-energy = grabSolar(login, date)
 
-csv = open('Weatherburn_Solar_Production.csv', 'a') # 'w' is write 'a' is append
-#csv.write(str(date) + "," + str(energy) + '\n')
-csv.write(str(energy) + '\n')
-csv.close()
+if __name__ == "__main__":
+    main()

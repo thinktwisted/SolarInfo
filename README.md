@@ -4,37 +4,51 @@ Grab daily solar production from the Enphase Enlighten API and daily weather fro
 
 ## How it works
 
-Two scripts append to `Weatherburn_Solar_Production.csv`, and **must run in order** (they cooperate to build one CSV row):
+Each script fetches its data and **upserts it into its own staging file, then rebuilds the combined CSV from staging + the existing archive**:
 
-1. `OpenWeather.py` (via `WeatherDaily.bat`) appends the row up to and including the weather fields, **without a trailing newline**.
-2. `SolarDataDailyGrab.py` (via `SolarDaily.bat`) appends the day's production in kWh plus the newline that closes the row.
+1. `OpenWeather.py` (`WeatherDaily.bat`) — current conditions for today's date → `weather_staging.csv`.
+2. `SolarDataDailyGrab.py` (`SolarDaily.bat`) — yesterday's production, stamped with *its own* date, from Enphase → `solar_staging.csv`.
+3. Both scripts then call `csvstore.merge_final()`, which regenerates `Weatherburn_Solar_Production.csv` (atomic temp-file rename, sorted by date, never half-written).
 
-`SolarBackData.py` is a one-off backfiller that re-fetches a hardcoded date range and **overwrites** the CSV with `date,kWh` rows only.
+Run them in any order, twice, or skip a day — the worst case is an empty column, never a corrupted row. `SolarBackData.py` backfills a date range through the same path (one API request covers the whole range).
 
-Production is fetched with `energy_lifetime?start_date=D&end_date=D`, so the scheduled scripts are intended to run once daily (originally ~2 PM) after the day closes. Note: as written, the weather half records *today* while the solar half records *yesterday* — the two halves describe different days.
+`csvstore.py` holds the staging/merge logic; `enphase.py` is the v4 API client. All file paths resolve next to the scripts, so the scheduled task's working directory doesn't matter.
 
 ## Requirements
 
 - Python 3 with `requests` (`pip install requests`)
-- An Enphase Enlighten account + public API key
+- An Enphase Enlighten account
 - An OpenWeatherMap API key
 
-> **The Enphase v2 public API (`api.enphaseenergy.com/api/v2`) reached end of life on June 30, 2024.** The scripts here target that dead endpoint; they will not return data until migrated to [Enphase API v4](https://developer-v4.enphase.com/) (bearer-token auth, `/v4/systems/{id}/production`). The OpenWeather `/data/2.5/weather` endpoint still works.
+Enphase migrated from API v2 to the **v4 Monitoring API** (v2 was decommissioned mid-2024). These scripts use v4: `GET /api/v4/systems/{id}/energy_lifetime`, which returns daily production for a date range in one call.
 
 ## Configuration
 
-Credentials live in two files that are **not** in this repo (keep them out of it):
+Credentials live in two files **not** in this repo (now also covered by `.gitignore` — keep it that way; an API key previously committed in a comment was scrubbed from history on 2026-11-05, but treat the old v2 key as burned and rotate/delete it in Enlighten).
 
-| File | Format |
-| --- | --- |
-| `SolarLoginInfo.txt` | Free-form lines; the scripts read line **6** = API key, line **7** = user ID, line **8** = system ID (1-based). Anything can occupy lines 1–5, but line count/order is load-bearing. |
-| `OpenWeatherAPI.txt` | Line 1 = your OpenWeatherMap APPID |
+### `SolarLoginInfo.txt`
 
-The location zip (default `43065`) and the CSV name are hardcoded in `OpenWeather.py` / `SolarDataDailyGrab.py`.
+```ini
+system_id = 1234567
+token = <your Enphase Personal Access Token>
+```
+
+Generate the token at https://entrez.enphaseenergy.com (sign in with your Enlighten account → *Generate Token*). Homeowner PATs are used directly as the bearer token; if you instead use a developer-app OAuth token, add `key = <application api key>`. The old v2 `key`/`user_id` fields are gone; v4 doesn't use `user_id`.
+
+### `OpenWeatherAPI.txt`
+
+Either line-based (first line = appid, optional second line = zip) or key=value:
+
+```ini
+appid = <your OpenWeatherMap key>
+zip = 43065
+```
+
+The zip is Westerville, OH; change it to yours.
 
 ## Scheduling (Windows)
 
-Edit the absolute paths inside `SolarDaily.bat` and `WeatherDaily.bat` (they were written for `E:\python\Solar Daily`), then register them as scheduled tasks — `WeatherDaily` first, `SolarDaily` a few minutes later. The scripts open their data files by relative path, so the task's *Start in* directory matters.
+`SolarDaily.bat` / `WeatherDaily.bat` now `cd` to their own folder and invoke the `py` launcher — no machine-specific paths. Register them as scheduled tasks (daily, e.g. 2 PM); order is no longer significant.
 
 ## Output
 
@@ -42,23 +56,23 @@ Edit the absolute paths inside `SolarDaily.bat` and `WeatherDaily.bat` (they wer
 
 | Column | Meaning |
 | --- | --- |
-| Date | Local run date of the weather half |
-| Temperature | °F from `main.temp_max` (station max near run time, not a true daily max) |
+| Date | The date the data describes (weather = snapshot day; kWh = production day) |
+| Temperature | °F from `main.temp_max` (station reading near run time, not a true daily max) |
 | Humidity | Percent |
 | Sky | Condition description |
 | Cloudiness | Percent cloud cover |
-| Wind | m/s (note: temp is converted to °F, wind is not converted) |
-| Sunrise / Sunset | Unix epoch seconds, local-tz shift applied server-side |
+| Wind | m/s (temp is converted to °F, wind is not converted) |
+| Sunrise / Sunset | Local `HH:MM` (older rows may still hold raw epoch seconds) |
 | Daylight_hr | Sunset − sunrise, hours |
-| kWh | Enphase production (Wh ÷ 1000) |
+| kWh | Enphase production, Wh ÷ 1000 |
+
+Staging files (`weather_staging.csv`, `solar_staging.csv`) are regenerable local state and gitignored; delete them and the next merge rebuilds from the archive.
 
 ## Known limitations
 
-- Built against the retired Enphase v2 API; needs migration to v4.
-- No error handling on the Enphase request: a failed/limited response crashes the script mid-row, leaving a dangling comma that corrupts every subsequent append until the CSV is repaired by hand.
-- Row integrity depends on strict task ordering and on both runs succeeding; a skipped or overlapping task scrambles rows.
-- Weather is a 2 PM snapshot, not a daily aggregate (no min/max/avg or daily cloud cover).
-- API request URLs are built by string interpolation and neither request sets a timeout.
+- Weather is a point-in-time snapshot (whatever the run-time call returns), not a daily min/max/avg. Enriching this needs OpenWeatherMap's paid One Call/Timemachine history API.
+- Sunrise/sunset come from the *current-day* call, so a manually re-run day gets today's values.
+- No error-retry: a failed API call exits non-zero and leaves prior data intact — rerun the task when it clears.
 - No data-visualization code in this repo despite the name (the original goal was to plot production vs. cloudiness).
 
 ## License
