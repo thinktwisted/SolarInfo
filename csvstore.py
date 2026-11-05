@@ -54,6 +54,16 @@ def yesterday():
     return (date.today() - timedelta(days=1)).isoformat()
 
 
+def known_solar_dates():
+    """ISO dates that already have a kWh value in staging or the archive."""
+    dates = set(load_staging(SOLAR_STAGING))
+    if FINAL_CSV.exists():
+        with open(FINAL_CSV, newline="", encoding="utf-8") as f:
+            dates |= {row["Date"] for row in csv.DictReader(f)
+                      if row.get("Date") and (row.get("kWh") or "").strip()}
+    return dates
+
+
 def load_staging(path):
     """Read a staging CSV into {date: row dict}; missing file means empty."""
     if not path.exists():

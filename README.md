@@ -7,12 +7,21 @@ Grab daily solar production from the Enphase Enlighten API and daily weather fro
 Each script fetches its data and **upserts it into its own staging file, then rebuilds the combined CSV from staging + the existing archive**:
 
 1. `OpenWeather.py` (`WeatherDaily.bat`) — current conditions for today's date → `weather_staging.csv`.
-2. `SolarDataDailyGrab.py` (`SolarDaily.bat`) — yesterday's production, stamped with *its own* date, from Enphase → `solar_staging.csv`.
+2. `SolarDataDailyGrab.py` (`SolarDaily.bat`) — **self-healing**: checks the last 14 days, and if any lack production data (e.g. a skipped/failed scheduled run), fetches them all in one `energy_lifetime` range call and fills the gaps, each row stamped with its own production date.
 3. Both scripts then call `csvstore.merge_final()`, which regenerates `Weatherburn_Solar_Production.csv` (atomic temp-file rename, sorted by date, never half-written).
 
 Run them in any order, twice, or skip a day — the worst case is an empty column, never a corrupted row. `SolarBackData.py` backfills a date range through the same path (one API request covers the whole range).
 
-`csvstore.py` holds the staging/merge logic; `enphase.py` is the v4 API client. All file paths resolve next to the scripts, so the scheduled task's working directory doesn't matter.
+`csvstore.py` holds the staging/merge logic; `enphase.py` is the v4 API client; `netutil.py` wraps every HTTP GET with retry/backoff. All file paths resolve next to the scripts, so the scheduled task's working directory doesn't matter.
+
+## Reliability
+
+Transient API failures don't lose a day's data, via two layers:
+
+- **In-run retry/backoff** (`netutil.get_json`): connection errors, timeouts, HTTP 429/500/502/503/504, and malformed JSON are retried up to 3 times with exponential backoff (5s, 20s, 80s); a `Retry-After` header overrides the wait. Other 4xx (e.g. a bad/expired token) exit immediately — retrying them only wastes the run. On hard failure the script exits non-zero and the archive is left byte-identical.
+- **Cross-day self-healing** (solar): production is backfillable from one range request, so the solar script re-checks a 14-day window each run and fills any day that's missing. A laptop that slept for a few days catches all of them up on the next successful run. (Adjust `LOOKBACK_DAYS` in `SolarDataDailyGrab.py`; a longer window costs no extra requests.)
+
+Weather can't self-heal a skipped day on the free tier — the current-conditions endpoint only reports *now*, so a missed `OpenWeather.py` run leaves that date's weather columns blank (past weather needs the paid One Call API).
 
 ## Requirements
 
@@ -72,7 +81,7 @@ Staging files (`weather_staging.csv`, `solar_staging.csv`) are regenerable local
 
 - Weather is a point-in-time snapshot (whatever the run-time call returns), not a daily min/max/avg. Enriching this needs OpenWeatherMap's paid One Call/Timemachine history API.
 - Sunrise/sunset come from the *current-day* call, so a manually re-run day gets today's values.
-- No error-retry: a failed API call exits non-zero and leaves prior data intact — rerun the task when it clears.
+- A hard-failed run exits non-zero and leaves data intact: solar self-heals next run (14-day window); a skipped weather day stays blank — see Reliability.
 - No data-visualization code in this repo despite the name (the original goal was to plot production vs. cloudiness).
 
 ## License

@@ -13,11 +13,10 @@ API docs: https://openweathermap.org/current
 import sys
 from datetime import date, datetime
 
-import requests
+import netutil
 
 import csvstore
 
-TIMEOUT = 30
 ZIP_DEFAULT = "43065"
 
 
@@ -29,17 +28,11 @@ def main():
         sys.exit("ERROR: OpenWeatherAPI.txt has no appid. See README.md.")
     zip_code = conf.get("zip") or (lines[1] if len(lines) > 1 else ZIP_DEFAULT)
 
-    try:
-        resp = requests.get(
-            "https://api.openweathermap.org/data/2.5/weather",
-            params={"zip": zip_code, "appid": appid},
-            timeout=TIMEOUT,
-        )
-    except requests.RequestException as exc:
-        sys.exit(f"ERROR: OpenWeatherMap request failed: {exc}")
-    if resp.status_code != 200:
-        sys.exit(f"ERROR: OpenWeatherMap returned {resp.status_code}: {resp.text.strip()}")
-    data = resp.json()
+    data = netutil.get_json(
+        "https://api.openweathermap.org/data/2.5/weather",
+        params={"zip": zip_code, "appid": appid},
+        label="OpenWeatherMap",
+    )
 
     main_ = data["main"]
     sys_ = data["sys"]
