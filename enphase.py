@@ -27,13 +27,14 @@ def _get(url, token, params, api_key=None):
 
 
 def fetch_production(system_id, token, start_iso, end_iso, api_key=None):
-    """Daily kWh production as {YYYY-MM-DD: float} for the returned range."""
-    data = _get(
-        f"{BASE_URL}/systems/{system_id}/energy_lifetime",
-        token,
-        {"start_date": start_iso, "end_date": end_iso},
-        api_key=api_key,
-    )
+    """Daily kWh production as {YYYY-MM-DD: float} for the returned range.
+
+    start_iso=None lets the API default to the system's operational date.
+    """
+    params = {"end_date": end_iso}
+    if start_iso is not None:
+        params["start_date"] = start_iso
+    data = _get(f"{BASE_URL}/systems/{system_id}/energy_lifetime", token, params, api_key)
     start = date.fromisoformat(data["start_date"])  # clamped to operational date
     days = {}
     for offset, wh in enumerate(data["production"]):  # Wh per day, no gaps

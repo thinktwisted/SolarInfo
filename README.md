@@ -10,7 +10,21 @@ Each script fetches its data and **upserts it into its own staging file, then re
 2. `SolarDataDailyGrab.py` (`SolarDaily.bat`) — **self-healing**: checks the last 14 days, and if any lack production data (e.g. a skipped/failed scheduled run), fetches them all in one `energy_lifetime` range call and fills the gaps, each row stamped with its own production date.
 3. Both scripts then call `csvstore.merge_final()`, which regenerates `Weatherburn_Solar_Production.csv` (atomic temp-file rename, sorted by date, never half-written).
 
-Run them in any order, twice, or skip a day — the worst case is an empty column, never a corrupted row. `SolarBackData.py` backfills a date range through the same path (one API request covers the whole range).
+Run them in any order, twice, or skip a day — the worst case is an empty column, never a corrupted row.
+
+## Pulling a date range
+
+`SolarDataDailyGrab.py` (which replaces the old `SolarBackData.py`) takes optional date args — one range request covers any length of range:
+
+```bash
+python SolarDataDailyGrab.py                              # default: self-heal the lookback window
+python SolarDataDailyGrab.py --start 2026-01-01 --end 2026-06-30
+python SolarDataDailyGrab.py --start 2020-02-01           # that date through yesterday
+python SolarDataDailyGrab.py --end 2024-12-31             # system install date through 2024
+python SolarDataDailyGrab.py --start ... --end ... --refresh   # also re-pull dates already on record
+```
+
+Range mode fills only missing days; `--refresh` overwrites the range's dates with fresh values (rows outside the range are never touched). Dates are ISO; `--end` defaults to yesterday. Weather has no range option — the free endpoint only reports current conditions, so `OpenWeather.py` always records the day it runs.
 
 `csvstore.py` holds the staging/merge logic; `enphase.py` is the v4 API client; `netutil.py` wraps every HTTP GET with retry/backoff. All file paths resolve next to the scripts, so the scheduled task's working directory doesn't matter.
 
@@ -19,7 +33,7 @@ Run them in any order, twice, or skip a day — the worst case is an empty colum
 Transient API failures don't lose a day's data, via two layers:
 
 - **In-run retry/backoff** (`netutil.get_json`): connection errors, timeouts, HTTP 429/500/502/503/504, and malformed JSON are retried up to 3 times with exponential backoff (5s, 20s, 80s); a `Retry-After` header overrides the wait. Other 4xx (e.g. a bad/expired token) exit immediately — retrying them only wastes the run. On hard failure the script exits non-zero and the archive is left byte-identical.
-- **Cross-day self-healing** (solar): production is backfillable from one range request, so the solar script re-checks a 14-day window each run and fills any day that's missing. A laptop that slept for a few days catches all of them up on the next successful run. (Adjust `LOOKBACK_DAYS` in `SolarDataDailyGrab.py`; a longer window costs no extra requests.)
+- **Cross-day self-healing** (solar): production is backfillable from one range request, so the solar script re-checks its lookback window (14 days by default; set `lookback_days = N` in `SolarLoginInfo.txt`) and fills any day that's missing. A laptop that slept for a few days catches all of them up on the next successful run, at no extra request cost.
 
 Weather can't self-heal a skipped day on the free tier — the current-conditions endpoint only reports *now*, so a missed `OpenWeather.py` run leaves that date's weather columns blank (past weather needs the paid One Call API).
 
@@ -40,6 +54,7 @@ Credentials live in two files **not** in this repo (now also covered by `.gitign
 ```ini
 system_id = 1234567
 token = <your Enphase Personal Access Token>
+lookback_days = 14    ; optional; self-heal window for unattended runs
 ```
 
 Generate the token at https://entrez.enphaseenergy.com (sign in with your Enlighten account → *Generate Token*). Homeowner PATs are used directly as the bearer token; if you instead use a developer-app OAuth token, add `key = <application api key>`. The old v2 `key`/`user_id` fields are gone; v4 doesn't use `user_id`.
